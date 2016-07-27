@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"strings"
 
 	"golang.org/x/net/context"
@@ -10,45 +8,49 @@ import (
 	slackbot "github.com/BeepBoopHQ/go-slackbot"
 	"github.com/briandowns/openweathermap"
 	"github.com/nlopes/slack"
+	"log"
+	"os"
+	"fmt"
 )
 
 func main() {
-	ListenForWeather()
+	ListenForHelloOrWeather()
 }
 
-func GetWeather(place string) (*openweathermap.CurrentWeatherData, error) {
-	w, err := openweathermap.NewCurrent("F", "en")
-	if err != nil {
-		return nil, fmt.Errorf("Could not get weather: %s", err)
-	}
-
-	err = w.CurrentByName(place)
-	if err != nil {
-		return nil, fmt.Errorf("Weather fetch fail:", err)
-	}
-	return w, nil
-}
-
-func ListenForWeather() {
+func ListenForHelloOrWeather() {
 	bot := slackbot.New(os.Getenv("SLACK_API_TOKEN"))
+	directMessage := bot.Messages(slackbot.DirectMessage, slackbot.DirectMention).Subrouter()
+	directMessage.Hear("(?i)hi|hello|howdy.*").MessageHandler(HelloHandler)
 	bot.Hear("(?i)weather (.*)").MessageHandler(WeatherHandler)
+	bot.Hear("(?i)weather").MessageHandler(WeatherHelpHandler)
 	bot.Run()
+
+}
+
+func HelloHandler(ctx context.Context, bot *slackbot.Bot, evt *slack.MessageEvent) {
+	bot.Reply(evt, "Hi there!", true)
 }
 
 func WeatherHandler(ctx context.Context, bot *slackbot.Bot, evt *slack.MessageEvent) {
-	parts := strings.Split(evt.Msg.Text, " ")
-	if len(parts) != 2 {
-		return
-	}
-	weather, err := GetWeather(parts[1])
+	place := strings.Split(evt.Msg.Text, " ")[1]
+	w, err := GetWeather(place)
 	if err != nil {
-		fmt.Println("Could not get weather:", err)
-		return
+		log.Fatal("Failed to get weather: ", err)
 	}
+	bot.Reply(evt,
+		fmt.Sprintf("The current temperature for %s is %.0f degrees fahrenheit (%s).",
+			w.Name, w.Main.Temp, w.Weather[0].Description), true)
+}
 
-	description := ""
-	if len(weather.Weather) > 0 {
-		description = weather.Weather[0].Description
+func GetWeather(place string) (weather *openweathermap.CurrentWeatherData, error error){
+	weather, err := openweathermap.NewCurrent("F", "EN")
+	if err != nil {
+		log.Fatal("Failed to create weather client: ", err)
 	}
-	bot.Reply(evt, fmt.Sprintf("The current temperature for %s is %.0f degrees farenheight (%s)", weather.Name, weather.Main.Temp, description), slackbot.WithTyping)
+	err = weather.CurrentByName(place)
+	return weather, err
+}
+
+func WeatherHelpHandler(ctx context.Context, bot *slackbot.Bot, evt *slack.MessageEvent) {
+	bot.Reply(evt, "To get the current weather for an area, type 'weather <ZIPCODE>'", true)
 }
